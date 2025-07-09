@@ -20,6 +20,11 @@ El proyecto está en proceso activo de desarrollo. Si bien las primeras versione
 
 Tu participación y feedback son bienvenidos. Si eres desarrollador, aficionado al ajedrez, o simplemente curioso, ¡anímate a contribuir con ideas, código o pruebas! Juntos, podemos crear la mejor base de Stockfish para el mundo .NET.
 
+## Contacto
+
+Para dudas, sugerencias o contribuciones, puedes abrir un issue en este repositorio o [contactarme](mailto:mauricio.cortes.1979@outlook.com)
+).
+
 ---
 
 **¡Explora, aprende y contribuye llevando la inteligencia del ajedrez a nuevos entornos con C#!**
