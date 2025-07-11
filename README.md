@@ -25,6 +25,3 @@ Tu participación y feedback son bienvenidos. Si eres desarrollador, aficionado 
 Para dudas, sugerencias o contribuciones, puedes abrir un issue en este repositorio o [contactarme](mailto:mauricio.cortes.1979@outlook.com)
 ).
 
----
-
-**¡Explora, aprende y contribuye llevando la inteligencia del ajedrez a nuevos entornos con C#!**
