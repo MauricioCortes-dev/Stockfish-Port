@@ -1,6 +1,6 @@
-﻿using Stockfish_7._1_CSharp_Port.Types;
+﻿using Stockfish_17_1_CSharp_Port.Types;
 
-namespace Stockfish_7._1_CSharp_Port;
+namespace Stockfish_17_1_CSharp_Port;
 
 class Program
 {

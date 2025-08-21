@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <TargetFrameworks>net9.0</TargetFrameworks>
-    <RootNamespace>Stockfish_7._1_CSharp_Port.Tests</RootNamespace>
+    <RootNamespace>Stockfish_17_1_CSharp_Port.Tests</RootNamespace>
 
     <IsPackable>false</IsPackable>
   </PropertyGroup>

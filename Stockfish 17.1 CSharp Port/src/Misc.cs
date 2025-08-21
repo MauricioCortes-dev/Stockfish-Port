@@ -16,7 +16,7 @@
   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-namespace Stockfish_7._1_CSharp_Port;
+namespace Stockfish_17_1_CSharp_Port;
 
 public class Misc
 {

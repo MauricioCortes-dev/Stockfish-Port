@@ -18,7 +18,7 @@
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 
-namespace Stockfish_7._1_CSharp_Port.Types;
+namespace Stockfish_17_1_CSharp_Port.Types;
 
 // A move needs 16 bits to be stored
 //

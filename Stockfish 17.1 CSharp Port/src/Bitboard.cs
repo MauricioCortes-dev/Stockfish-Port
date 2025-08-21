@@ -18,10 +18,10 @@
 using System.Diagnostics;
 using System.Numerics;
 using System.Runtime.CompilerServices;
-using Stockfish_7._1_CSharp_Port.Types;
-using File = Stockfish_7._1_CSharp_Port.Types.File;
+using Stockfish_17_1_CSharp_Port.Types;
+using File = Stockfish_17_1_CSharp_Port.Types.File;
 
-namespace Stockfish_7._1_CSharp_Port;
+namespace Stockfish_17_1_CSharp_Port;
 
 public struct Bitboard: IEquatable<Bitboard>
 {

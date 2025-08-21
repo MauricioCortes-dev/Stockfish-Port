@@ -17,7 +17,7 @@
 */
 using System.Runtime.CompilerServices;
 
-namespace Stockfish_7._1_CSharp_Port.Types;
+namespace Stockfish_17_1_CSharp_Port.Types;
 
 public struct File: IEquatable<File>
 {

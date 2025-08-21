@@ -18,7 +18,7 @@
 using System.Runtime.CompilerServices;
 using System.Diagnostics;
 
-namespace Stockfish_7._1_CSharp_Port.Types;
+namespace Stockfish_17_1_CSharp_Port.Types;
 
 public struct Color: IEquatable<Color>
 {

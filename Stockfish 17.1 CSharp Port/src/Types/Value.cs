@@ -18,7 +18,7 @@
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 
-namespace Stockfish_7._1_CSharp_Port.Types;
+namespace Stockfish_17_1_CSharp_Port.Types;
 
 // Value is used as an alias for int, this is done to differentiate between a search
 // value and any other integer value. The values used in search are always supposed
