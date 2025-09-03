@@ -28,24 +28,24 @@ using Key = System.UInt64;
 public class StateInfo
 {
     // Copied when making a move
-    Key materialKey;
-    Key pawnKey;
-    Key minorPieceKey;
-    Key[] nonPawnKey = new Key[Color.COLOR_NB];
-    Value[] nonPawnMaterial = new Value[Color.COLOR_NB];
-    int    castlingRights;
-    int    rule50;
-    int    pliesFromNull;
-    Square epSquare;
+    public Key materialKey;
+    public Key pawnKey;
+    public Key minorPieceKey;
+    public Key[] nonPawnKey = new Key[Color.COLOR_NB];
+    public Value[] nonPawnMaterial = new Value[Color.COLOR_NB];
+    public int castlingRights;
+    public int rule50;
+    public int pliesFromNull;
+    public Square epSquare;
     
     // Not copied when making a move (will be recomputed anyhow)
-    Key key;
-    Bitboard checkersBB;
-    StateInfo previous;
-    StateInfo next;
-    Bitboard[] blockersForKing  = new Bitboard[Color.COLOR_NB];
-    Bitboard[] pinners = new Bitboard[Color.COLOR_NB];
-    Bitboard[] checkSquares = new Bitboard[PieceType.PIECE_TYPE_NB];
-    Piece capturedPiece;
-    int repetition;
+    public Key key;
+    public Bitboard checkersBB;
+    public StateInfo previous;
+    public StateInfo next;
+    public Bitboard[] blockersForKing  = new Bitboard[Color.COLOR_NB];
+    public Bitboard[] pinners = new Bitboard[Color.COLOR_NB];
+    public Bitboard[] checkSquares = new Bitboard[PieceType.PIECE_TYPE_NB];
+    public Piece capturedPiece;
+    public int repetition;
 }
