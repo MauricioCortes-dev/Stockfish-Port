@@ -101,5 +101,149 @@ public class Position : ICloneable
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public Square ep_square() { return st.epSquare; }
     
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public Color side_to_move(){ return sideToMove; }
     
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool empty(Square s) { return piece_on(s) == Piece.NO_PIECE; }
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public Piece moved_piece(Move m){ return piece_on(m.from_sq()); }
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public int count(Color c, PieceType Pt){
+        return pieceCount[Piece.make_piece(c, Pt)];
+    }
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public int count(PieceType Pt){
+        return count(Color.WHITE, Pt) + count(Color.BLACK, Pt);
+    }
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public Square square(Color c, PieceType Pt){
+        Debug.Assert(count(c, Pt) == 1);
+        return Bitboard.lsb(pieces(c, Pt));
+    }
+    
+    // Castling
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool can_castle(CastlingRights cr){ return (st.castlingRights & (int)cr)!=0; }
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public CastlingRights castling_rights(Color c){
+        return c & (CastlingRights)st.castlingRights;
+    }
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool castling_impeded(CastlingRights cr){
+        Debug.Assert(cr == CastlingRights.WHITE_OO || cr == CastlingRights.WHITE_OOO || cr == CastlingRights.BLACK_OO || cr == CastlingRights.BLACK_OOO);
+        return (pieces() & castlingPath[cr])!=0;
+    }
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public Square castling_rook_square(CastlingRights cr){
+        Debug.Assert(cr == CastlingRights.WHITE_OO || cr == CastlingRights.WHITE_OOO || cr == CastlingRights.BLACK_OO || cr == CastlingRights.BLACK_OOO);
+        return castlingRookSquare[cr];
+    }
+    
+    // Checking
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public Bitboard checkers(){ return st.checkersBB; }
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public Bitboard blockers_for_king(Color c) { return st.blockersForKing[c]; }
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public Bitboard check_squares(PieceType pt) { return st.checkSquares[pt]; }
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public Bitboard pinners(Color c) { return st.pinners[c]; }
+    
+    // Attacks to/from a given square
+    
+    // Computes a bitboard of all pieces which attack a given square.
+    // Slider attacks use the occupied bitboard to indicate occupancy.
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public Bitboard attackers_to(Square s, Bitboard occupied) {
+
+        return (Bitboard.attacks_bb(s, occupied, PieceType.ROOK) & pieces(PieceType.ROOK, PieceType.QUEEN))
+               | (Bitboard.attacks_bb(s, occupied, PieceType.BISHOP) & pieces(PieceType.BISHOP, PieceType.QUEEN))
+               | (Bitboard.pawn_attacks_bb(Color.BLACK, s) & pieces(Color.WHITE, PieceType.PAWN))
+               | (Bitboard.pawn_attacks_bb(Color.WHITE, s) & pieces(Color.BLACK, PieceType.PAWN))
+               | (Bitboard.attacks_bb(s, PieceType.KNIGHT) & pieces(PieceType.KNIGHT)) | (Bitboard.attacks_bb(s, PieceType.KING) & pieces(PieceType.KING));
+    }
+        
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public Bitboard attackers_to(Square s) { return attackers_to(s, pieces()); }
+    
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool attackers_to_exist(Square s, Bitboard occupied, Color c) {
+
+        return (((Bitboard.attacks_bb(s, PieceType.ROOK) & pieces(c, PieceType.ROOK, PieceType.QUEEN))
+                && (Bitboard.attacks_bb(s, occupied, PieceType.ROOK) & pieces(c, PieceType.ROOK, PieceType.QUEEN)))
+               || ((Bitboard.attacks_bb(s, PieceType.BISHOP) & pieces(c, PieceType.BISHOP, PieceType.QUEEN))
+                   && (Bitboard.attacks_bb(s, occupied, PieceType.BISHOP) & pieces(c, PieceType.BISHOP, PieceType.QUEEN)))
+               || (((Bitboard.pawn_attacks_bb(~c, s) & pieces(PieceType.PAWN)) | (Bitboard.attacks_bb(s, PieceType.KNIGHT) & pieces(PieceType.KNIGHT))
+                                                                               | (Bitboard.attacks_bb(s, PieceType.KING) & pieces(PieceType.KING)))
+                   & pieces(c)))!=0;
+    }
+        
+        
+    // Calculates st->blockersForKing[c] and st->pinners[~c],
+    // which store respectively the pieces preventing king of color c from being in check
+    // and the slider pieces of color ~c pinning pieces of color c to the king.
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void update_slider_blockers(Color c) {
+
+        Square ksq = square(c, PieceType.KING);
+
+        st.blockersForKing[c] = 0;
+        st.pinners[~c]        = 0;
+
+        // Snipers are sliders that attack 's' when a piece and other snipers are removed
+        Bitboard snipers = ((Bitboard.attacks_bb(ksq, PieceType.ROOK) & pieces(PieceType.QUEEN, PieceType.ROOK))
+                            | (Bitboard.attacks_bb(ksq, PieceType.BISHOP) & pieces(PieceType.QUEEN, PieceType.BISHOP)))
+                           & pieces(~c);
+        Bitboard occupancy = pieces() ^ snipers;
+
+        while (snipers)
+        {
+            Square   sniperSq = Bitboard.pop_lsb(ref snipers);
+            Bitboard b        = Bitboard.between_bb(ksq, sniperSq) & occupancy;
+
+            if (b!=0 && !Bitboard.more_than_one(b))
+            {
+                st.blockersForKing[c] |= b;
+                if (b & pieces(c))
+                    st.pinners[~c] |= sniperSq;
+            }
+        }
+    }
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public Bitboard attacks_by(Color c, PieceType Pt) {
+
+        if(Pt == PieceType.PAWN)
+            return c == Color.WHITE ? Bitboard.pawn_attacks_bb(pieces(Color.WHITE, PieceType.PAWN), Color.WHITE)
+            : Bitboard.pawn_attacks_bb(pieces(Color.BLACK, PieceType.PAWN), Color.BLACK);
+        else
+        {
+            Bitboard threats   = 0;
+            Bitboard attackers = pieces(c, Pt);
+            while (attackers)
+                threats |= Bitboard.attacks_bb(Bitboard.pop_lsb(ref attackers), pieces(), Pt);
+            return threats;
+        }
+    }
+    
+    // Properties of moves
+    // bool  legal(Move m) const;
+    // bool  pseudo_legal(const Move m) const;
+    // bool  capture(Move m) const;
+    // bool  capture_stage(Move m) const;
+    // bool  gives_check(Move m) const;
+    // Piece moved_piece(Move m) const;
+    // Piece captured_piece() const;
 }
