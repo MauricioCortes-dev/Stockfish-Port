@@ -19,6 +19,8 @@
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using Stockfish_17_1_CSharp_Port.Types;
+using System.Linq;
+
 
 namespace Stockfish_17_1_CSharp_Port.Position;
 
@@ -28,6 +30,20 @@ namespace Stockfish_17_1_CSharp_Port.Position;
 // traversing the search tree.
 public class Position : ICloneable 
 {
+    
+    public static readonly Piece[] Pieces = {Piece.W_PAWN, Piece.W_KNIGHT, Piece.W_BISHOP, Piece.W_ROOK, Piece.W_QUEEN, Piece.W_KING,
+        Piece.B_PAWN, Piece.B_KNIGHT, Piece.B_BISHOP, Piece.B_ROOK, Piece.B_QUEEN, Piece.B_KING};
+
+    public static readonly Color[] Colors = {Color.WHITE, Color.BLACK };
+        
+    public static readonly CastlingRights[][] Castlingrights = new CastlingRights[][]
+    {
+        new CastlingRights[] { Color.WHITE & CastlingRights.KING_SIDE,  Color.WHITE & CastlingRights.QUEEN_SIDE },
+        new CastlingRights[] { Color.BLACK & CastlingRights.KING_SIDE,  Color.BLACK & CastlingRights.QUEEN_SIDE }
+    };
+
+    
+
     // Data members
     public Piece[] board = new Piece[Square.SQUARE_NB];
     public Bitboard[] byTypeBB = new Bitboard[PieceType.PIECE_TYPE_NB];
@@ -239,11 +255,327 @@ public class Position : ICloneable
     }
     
     // Properties of moves
-    // bool  legal(Move m) const;
-    // bool  pseudo_legal(const Move m) const;
-    // bool  capture(Move m) const;
-    // bool  capture_stage(Move m) const;
-    // bool  gives_check(Move m) const;
-    // Piece moved_piece(Move m) const;
-    // Piece captured_piece() const;
+    // Tests whether a pseudo-legal move is legal
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool legal(Move m) {
+
+        Debug.Assert(m.is_ok());
+
+        Color  us   = sideToMove;
+        Square from = m.from_sq();
+        Square to   = m.to_sq();
+
+        Debug.Assert(Color.color_of(moved_piece(m)) == us);
+        Debug.Assert(piece_on(square(us, PieceType.KING)) == Piece.make_piece(us, PieceType.KING));
+
+        // En passant captures are a tricky special case. Because they are rather
+        // uncommon, we do it simply by testing whether the king is attacked after
+        // the move is made.
+        if (m.type_of() == MoveType.EN_PASSANT)
+        {
+            Square   ksq      = square(us, PieceType.KING);
+            Square   capsq    = to - Direction.pawn_push(us);
+            Bitboard occupied = (pieces() ^ from ^ capsq) | to;
+
+            Debug.Assert(to == ep_square());
+            Debug.Assert(moved_piece(m) == Piece.make_piece(us, PieceType.PAWN));
+            Debug.Assert(piece_on(capsq) == Piece.make_piece(~us, PieceType.PAWN));
+            Debug.Assert(piece_on(to) == Piece.NO_PIECE);
+
+            return 0==(Bitboard.attacks_bb(ksq, occupied, PieceType.ROOK) & pieces(~us, PieceType.QUEEN, PieceType.ROOK))
+                && 0==(Bitboard.attacks_bb(ksq, occupied, PieceType.BISHOP) & pieces(~us, PieceType.QUEEN, PieceType.BISHOP));
+        }
+
+        // Castling moves generation does not check if the castling path is clear of
+        // enemy attacks, it is delayed at a later time: now!
+        if (m.type_of() == MoveType.CASTLING)
+        {
+            // After castling, the rook and king final positions are the same in
+            // Chess960 as they would be in standard chess.
+            to             = Square.relative_square(us, to > from ? Square.SQ_G1 : Square.SQ_C1);
+            Direction step = to > from ? Direction.WEST : Direction.EAST;
+
+            for (Square s = to; s != from; s += step)
+                if (attackers_to_exist(s, pieces(), ~us))
+                    return false;
+
+            // In case of Chess960, verify if the Rook blocks some checks.
+            // For instance an enemy queen in SQ_A1 when castling rook is in SQ_B1.
+            return !chess960 || 0==(blockers_for_king(us) & m.to_sq());
+        }
+
+        // If the moving piece is a king, check whether the destination square is
+        // attacked by the opponent.
+        if (PieceType.type_of(piece_on(from)) == PieceType.KING)
+            return !(attackers_to_exist(to, pieces() ^ from, ~us));
+
+        // A non-king move is legal if and only if it is not pinned or it
+        // is moving along the ray towards or away from the king.
+        return 0==(blockers_for_king(us) & from) || 0!=(Bitboard.line_bb(from, to) & pieces(us, PieceType.KING));
+    }
+    
+    // Takes a random move and tests whether the move is
+    // pseudo-legal. It is used to validate moves from TT that can be corrupted
+    // due to SMP concurrent access or hash position key aliasing.
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool pseudo_legal(Move m) {
+
+        Color  us   = sideToMove;
+        Square from = m.from_sq();
+        Square to   = m.to_sq();
+        Piece  pc   = moved_piece(m);
+
+        // Use a slower but simpler function for uncommon cases
+        // yet we skip the legality check of MoveList<LEGAL>().
+        if (m.type_of() != MoveType.NORMAL)
+            return checkers() ? MoveList<GenType.EVASIONS>(*this).contains(m)
+                              : MoveList<GenType.NON_EVASIONS>(*this).contains(m);
+
+        // Is not a promotion, so the promotion piece must be empty
+        Debug.Assert(m.promotion_type() - PieceType.KNIGHT == PieceType.NO_PIECE_TYPE);
+
+        // If the 'from' square is not occupied by a piece belonging to the side to
+        // move, the move is obviously not legal.
+        if (pc == Piece.NO_PIECE || Color.color_of(pc) != us)
+            return false;
+
+        // The destination square cannot be occupied by a friendly piece
+        if (pieces(us) & to)
+            return false;
+
+        // Handle the special case of a pawn move
+        if (PieceType.type_of(pc) == PieceType.PAWN)
+        {
+            // We have already handled promotion moves, so destination cannot be on the 8th/1st rank
+            if ((Bitboard.Rank8BB | Bitboard.Rank1BB) & to)
+                return false;
+
+            if (0==(Bitboard.pawn_attacks_bb(us, from) & pieces(~us) & to)  // Not a capture
+                && !((from + Direction.pawn_push(us) == to) && empty(to))  // Not a single push
+                && !((from + 2 * Direction.pawn_push(us) == to)            // Not a double push
+                     && (Rank.relative_rank(us, from) == Rank.RANK_2) && empty(to) && empty(to - Direction.pawn_push(us))))
+                return false;
+        }
+        else if (0==(Bitboard.attacks_bb(PieceType.type_of(pc), from, pieces()) & to))
+            return false;
+
+        // Evasions generator already takes care to avoid some kind of illegal moves
+        // and legal() relies on this. We therefore have to take care that the same
+        // kind of moves are filtered out here.
+        if (checkers())
+        {
+            if (PieceType.type_of(pc) != PieceType.KING)
+            {
+                // Double check? In this case, a king move is required
+                if (Bitboard.more_than_one(checkers()))
+                    return false;
+
+                // Our move must be a blocking interposition or a capture of the checking piece
+                if (0==(Bitboard.between_bb(square(us, PieceType.KING), Bitboard.lsb(checkers())) & to))
+                    return false;
+            }
+            // In case of king moves under check we have to remove the king so as to catch
+            // invalid moves like b1a1 when opposite queen is on c1.
+            else if (attackers_to_exist(to, pieces() ^ from, ~us))
+                return false;
+        }
+
+        return true;
+    }
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool capture(Move m){
+        Debug.Assert(m.is_ok());
+        return (!empty(m.to_sq()) && m.type_of() != MoveType.CASTLING) || m.type_of() == MoveType.EN_PASSANT;
+    }
+        
+    // Returns true if a move is generated from the capture stage, having also
+    // queen promotions covered, i.e. consistency with the capture stage move
+    // generation is needed to avoid the generation of duplicate moves.
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool capture_stage(Move m) {
+        Debug.Assert(m.is_ok());
+        return capture(m) || m.promotion_type() == PieceType.QUEEN;
+    }
+        
+    // Tests whether a pseudo-legal move gives a check
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool gives_check(Move m) {
+
+        Debug.Assert(m.is_ok());
+        Debug.Assert(Color.color_of(moved_piece(m)) == sideToMove);
+
+        Square from = m.from_sq();
+        Square to   = m.to_sq();
+
+        // Is there a direct check?
+        if (check_squares(PieceType.type_of(piece_on(from))) & to)
+            return true;
+
+        // Is there a discovered check?
+        if (blockers_for_king(~sideToMove) & from)
+            return 0==(Bitboard.line_bb(from, to) & pieces(~sideToMove, PieceType.KING)) || m.type_of() == MoveType.CASTLING;
+
+        if (m.type_of()==MoveType.NORMAL)
+        {
+            return false;
+        }
+        if (m.type_of() == MoveType.PROMOTION)
+        {
+            return 0!=(Bitboard.attacks_bb(m.promotion_type(), to, pieces() ^ from) & pieces(~sideToMove, PieceType.KING));
+        }
+        // En passant capture with check? We have already handled the case of direct
+        // checks and ordinary discovered check, so the only case we need to handle
+        // is the unusual case of a discovered check through the captured pawn.
+        if (m.type_of() == MoveType.EN_PASSANT)
+        {
+            Square   capsq = Square.make_square(Square.file_of(to), Square.rank_of(from));
+            Bitboard b     = (pieces() ^ from ^ capsq) | to;
+
+            return 0!=((Bitboard.attacks_bb(square(~sideToMove, PieceType.KING), b, PieceType.ROOK) & pieces(sideToMove, PieceType.QUEEN, PieceType.ROOK))
+                   | (Bitboard.attacks_bb(square(~sideToMove, PieceType.KING), b, PieceType.BISHOP)
+                      & pieces(sideToMove, PieceType.QUEEN, PieceType.BISHOP)));
+        }
+        
+        //default :  //CASTLING
+        // Castling is encoded as 'king captures the rook'
+        Square rto = Square.relative_square(sideToMove, to > from ? Square.SQ_F1 : Square.SQ_D1);
+
+        return 0!=(check_squares(PieceType.ROOK) & rto);
+    }
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public Piece captured_piece() { return st.capturedPiece; }
+    
+    // Doing and undoing moves
+    
+    // Unmakes a move. When it returns, the position should
+    // be restored to exactly the same state as before the move was made.
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void undo_move(Move m) {
+
+        Debug.Assert(m.is_ok());
+
+        sideToMove = ~sideToMove;
+
+        Color  us   = sideToMove;
+        Square from = m.from_sq();
+        Square to   = m.to_sq();
+        Piece  pc   = piece_on(to);
+
+        Debug.Assert(empty(from) || m.type_of() == MoveType.CASTLING);
+        Debug.Assert(PieceType.type_of(st.capturedPiece) != PieceType.KING);
+
+        if (m.type_of() == MoveType.PROMOTION)
+        {
+            Debug.Assert(Rank.relative_rank(us, to) == Rank.RANK_8);
+            Debug.Assert(PieceType.type_of(pc) == m.promotion_type());
+            Debug.Assert(PieceType.type_of(pc) >= PieceType.KNIGHT && PieceType.type_of(pc) <= PieceType.QUEEN);
+
+            remove_piece(to);
+            pc = Piece.make_piece(us, PieceType.PAWN);
+            put_piece(pc, to);
+        }
+
+        if (m.type_of() == MoveType.CASTLING)
+        {
+            Square rfrom, rto;
+            do_castling<false>(us, from, to, rfrom, rto);
+        }
+        else
+        {
+            move_piece(to, from);  // Put the piece back at the source square
+
+            if (st.capturedPiece)
+            {
+                Square capsq = to;
+
+                if (m.type_of() == MoveType.EN_PASSANT)
+                {
+                    capsq -= Direction.pawn_push(us);
+
+                    Debug.Assert(PieceType.type_of(pc) == PieceType.PAWN);
+                    Debug.Assert(to == st.previous.epSquare);
+                    Debug.Assert(Rank.relative_rank(us, to) == Rank.RANK_6);
+                    Debug.Assert(piece_on(capsq) == Piece.NO_PIECE);
+                    Debug.Assert(st.capturedPiece == Piece.make_piece(~us, PieceType.PAWN));
+                }
+
+                put_piece(st.capturedPiece, capsq);  // Restore the captured piece
+            }
+        }
+
+        // Finally point our state pointer back to the previous state
+        st = st.previous;
+        --gamePly;
+
+        Debug.Assert(pos_is_ok());
+    }
+    // void       do_move(Move m, StateInfo& newSt, const TranspositionTable* tt);
+    // DirtyPiece do_move(Move m, StateInfo& newSt, bool givesCheck, const TranspositionTable* tt);
+    // void       do_null_move(StateInfo& newSt, const TranspositionTable& tt);
+    
+    // Must be used to undo a "null move"
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void undo_null_move() {
+
+        Debug.Assert(0==checkers());
+
+        st         = st.previous;
+        sideToMove = ~sideToMove;
+    }
+    
+    // Performs some consistency checks for the position object
+    // and raise an assert if something wrong is detected.
+    // This is meant to be helpful when debugging.
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool pos_is_ok() {
+
+        bool Fast = true;  // Quick (default) or full check?
+
+        if ((sideToMove != Color.WHITE && sideToMove != Color.BLACK) || piece_on(square(Color.WHITE, PieceType.KING)) != Piece.W_KING 
+            || piece_on(square(Color.BLACK, PieceType.KING)) != Piece.B_KING
+            || (ep_square() != Square.SQ_NONE && Rank.relative_rank(sideToMove, ep_square()) != Rank.RANK_6))
+            Debug.Assert(false, "pos_is_ok: Default");
+
+        if (Fast)
+            return true;
+
+        if (pieceCount[Piece.W_KING] != 1 || pieceCount[Piece.B_KING] != 1
+            || attackers_to_exist(square(~sideToMove, PieceType.KING), pieces(), sideToMove))
+            Debug.Assert(false, "pos_is_ok: Kings");
+
+        if (0!=(pieces(PieceType.PAWN) & (Bitboard.Rank1BB | Bitboard.Rank8BB)) || pieceCount[Piece.W_PAWN] > 8 || pieceCount[Piece.B_PAWN] > 8)
+            Debug.Assert(false, "pos_is_ok: Pawns");
+
+        if (0!=(pieces(Color.WHITE) & pieces(Color.BLACK)) || (pieces(Color.WHITE) | pieces(Color.BLACK)) != pieces()
+            || Bitboard.popcount(pieces(Color.WHITE)) > 16 || Bitboard.popcount(pieces(Color.BLACK)) > 16)
+            Debug.Assert(false, "pos_is_ok: Bitboards");
+
+        for (PieceType p1 = PieceType.PAWN; p1 <= PieceType.KING; ++p1)
+            for (PieceType p2 = PieceType.PAWN; p2 <= PieceType.KING; ++p2)
+                if (p1 != p2 && 0!=(pieces(p1) & pieces(p2)))
+                    Debug.Assert(false, "pos_is_ok: Bitboards");
+
+
+        foreach (Piece pc in Pieces)
+            if (pieceCount[pc] != Bitboard.popcount(pieces(Color.color_of(pc), PieceType.type_of(pc)))
+                || pieceCount[pc] != board.Count(x => x == pc))
+                Debug.Assert(false, "pos_is_ok: Pieces");
+
+        foreach (Color c in Colors)
+            foreach (CastlingRights cr in Castlingrights[c])
+            {
+                if (!can_castle(cr))
+                    continue;
+
+                if (piece_on(castlingRookSquare[cr]) != Piece.make_piece(c, PieceType.ROOK)
+                    || castlingRightsMask[castlingRookSquare[cr]] != cr
+                    || (castlingRightsMask[square(c, PieceType.KING)] & cr) != cr)
+                    Debug.Assert(false, "pos_is_ok: Castling");
+            }
+
+        return true;
+    }
 }
